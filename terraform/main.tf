@@ -1,4 +1,4 @@
-# S3 Buckets and CloudFront
+########## S3 Buckets and CloudFront ##########
 resource "aws_s3_bucket" "website" {
   bucket = var.website_bucket_name
 
@@ -40,8 +40,45 @@ resource "aws_s3_bucket_public_access_block" "website" {
   restrict_public_buckets = true
 }
 
-resource "aws_cloudfront_origin_access_identity" "website" {
-  comment = "${var.project_name} website OAI"
+resource "aws_s3_bucket_ownership_controls" "website" {
+  bucket = aws_s3_bucket.website.id
+
+  rule {
+    object_ownership = "ObjectWriter"
+  }
+}
+
+resource "aws_cloudfront_origin_access_control" "website" {
+  name                              = "website_oac_${var.environment}"
+  description                       = "Origin Access Control for website bucket"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_cache_policy" "disabled" {
+  name        = "CachingDisabled"
+  comment     = "Policy with caching disabled"
+  default_ttl = 0
+  max_ttl     = 0
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_brotli = false
+    enable_accept_encoding_gzip   = false
+    
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    
+    headers_config {
+      header_behavior = "none"
+    }
+    
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "website" {
@@ -50,16 +87,41 @@ resource "aws_s3_bucket_policy" "website" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowCloudFrontAccess"
+        Sid       = "AllowCloudFrontServicePrincipal"
         Effect    = "Allow"
         Principal = {
-          AWS = "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${aws_cloudfront_origin_access_identity.website.id}"
+          Service = "cloudfront.amazonaws.com"
         }
         Action   = "s3:GetObject"
         Resource = "${aws_s3_bucket.website.arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.website.arn
+          }
+        }
       }
     ]
   })
+}
+
+resource "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name    = "AllViewerExceptHostHeader"
+  comment = "Policy to forward all parameters in viewer requests except for the Host header"
+  
+  cookies_config {
+    cookie_behavior = "all"
+  }
+  
+  headers_config {
+    header_behavior = "allExcept"
+    headers {
+      items = ["Host"]
+    }
+  }
+  
+  query_strings_config {
+    query_string_behavior = "all"
+  }
 }
 
 resource "aws_cloudfront_distribution" "website" {
@@ -69,27 +131,20 @@ resource "aws_cloudfront_distribution" "website" {
   price_class         = "PriceClass_100"
 
   origin {
-    domain_name = aws_s3_bucket.website.bucket_regional_domain_name
-    origin_id   = "S3-${aws_s3_bucket.website.bucket}"
-
-    s3_origin_config {
-      origin_access_identity = aws_cloudfront_origin_access_identity.website.cloudfront_access_identity_path
-    }
+    domain_name              = aws_s3_bucket.website.bucket_regional_domain_name
+    origin_id                = "S3-${aws_s3_bucket.website.bucket}"
+    origin_access_control_id = aws_cloudfront_origin_access_control.website.id
   }
 
   default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods         = ["GET", "HEAD"]
-    target_origin_id      = "S3-${aws_s3_bucket.website.bucket}"
-    viewer_protocol_policy = "redirect-to-https"
-    compress              = true
+    target_origin_id       = "S3-${aws_s3_bucket.website.bucket}"
+    viewer_protocol_policy = "allow-all"
+    # compress               = true
 
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
+    cache_policy_id = aws_cloudfront_cache_policy.disabled.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.all_viewer_except_host.id
 
     min_ttl     = 0
     default_ttl = 3600
@@ -123,8 +178,9 @@ resource "aws_cloudfront_distribution" "website" {
     Environment = var.environment
   }
 }
+##########################################################################################
 
-# DynamoDB Tables
+########## DynamoDB Tables ##########
 resource "aws_dynamodb_table" "questions" {
   name           = "KahootQuestions"
   billing_mode   = "PAY_PER_REQUEST"
@@ -205,8 +261,9 @@ resource "aws_dynamodb_table" "answers" {
     Environment = var.environment
   }
 }
+####################################################################################################
 
-# SQS Queue
+########## SQS Queue ##########
 resource "aws_sqs_queue" "game_answers" {
   name                      = "${var.project_name}-game-answers-${var.environment}"
   visibility_timeout_seconds = 30
@@ -218,20 +275,34 @@ resource "aws_sqs_queue" "game_answers" {
     Environment = var.environment
   }
 }
+####################################################################################################
 
-# Lambda Functions Configuration
+########## Lambda Resource Packaging ##########
+data "archive_file" "lambda_package_get_questions" {
+  type = "zip"
+  source_dir = "${path.module}/../lambdas/getQuestions"
+  output_path = "${path.module}/../lambdas/getQuestions/getQuestions.zip"
+}
+
+data "archive_file" "lambda_package_handle_websocket" {
+  type = "zip"
+  source_dir = "${path.module}/../lambdas/handleWebSocket"
+  output_path = "${path.module}/../lambdas/handleWebSocket/handleWebSocket.zip"
+}
+
+data "archive_file" "lambda_package_sqs_processor" {
+  type = "zip"
+  source_dir = "${path.module}/../lambdas/sqsProcessor"
+  output_path = "${path.module}/../lambdas/sqsProcessor/sqsProcessor.zip"
+}
+
+########## Lambda Functions Configuration ##########
 resource "aws_lambda_function" "get_questions" {
-  filename         = "../lambdas/getQuestions/getQuestions.zip"
+  filename         = data.archive_file.lambda_package_get_questions.output_path
   function_name    = "${var.project_name}-get-questions-${var.environment}"
   role            = aws_iam_role.lambda_role.arn
   handler         = "getQuestions.handler"
   runtime         = var.lambda_runtime
-
-  # environment {
-  #   variables = {
-  #     QUESTIONS_TABLE = aws_dynamodb_table.questions.name
-  #   }
-  # }
 
   tags = {
     Name        = "${var.project_name}-get-questions"
@@ -240,7 +311,7 @@ resource "aws_lambda_function" "get_questions" {
 }
 
 resource "aws_lambda_function" "websocket_handler" {
-  filename         = "../lambdas/handleWebSocket/handleWebSocket.zip"
+  filename         = data.archive_file.lambda_package_handle_websocket.output_path
   function_name    = "${var.project_name}-websocket-handler-${var.environment}"
   role            = aws_iam_role.lambda_role.arn
   handler         = "handleWebSocket.handler"
@@ -260,7 +331,7 @@ resource "aws_lambda_function" "websocket_handler" {
 }
 
 resource "aws_lambda_function" "sqs_processor" {
-  filename         = "../lambdas/sqsProcessor/sqsProcessor.zip"
+  filename         = data.archive_file.lambda_package_sqs_processor.output_path
   function_name    = "${var.project_name}-sqs-processor-${var.environment}"
   role            = aws_iam_role.lambda_role.arn
   handler         = "sqsProcessor.handler"
@@ -277,8 +348,9 @@ resource "aws_lambda_function" "sqs_processor" {
     Environment = var.environment
   }
 }
+##########################################################################################
 
-# IAM Configuration
+########## IAM Configuration ##########
 resource "aws_iam_role" "lambda_role" {
   name = "${var.project_name}-lambda-role-${var.environment}"
 
@@ -358,8 +430,9 @@ resource "aws_iam_role_policy" "lambda_policy" {
     ]
   })
 }
+##########################################################################################
 
-# API Gateway REST API
+########## API Gateway REST API ##########
 resource "aws_api_gateway_rest_api" "questions" {
   name = "${var.project_name}-questions-api-${var.environment}"
 
@@ -409,8 +482,9 @@ resource "aws_api_gateway_stage" "questions" {
   rest_api_id   = aws_api_gateway_rest_api.questions.id
   stage_name    = var.environment
 }
+####################################################################################################
 
-# WebSocket API
+########## API Gateway WebSocket API ##########
 resource "aws_apigatewayv2_api" "websocket" {
   name                       = "${var.project_name}-websocket-${var.environment}"
   protocol_type             = "WEBSOCKET"
@@ -503,8 +577,9 @@ resource "aws_apigatewayv2_integration" "websocket" {
   integration_uri  = aws_lambda_function.websocket_handler.invoke_arn
   integration_method = "POST"
 }
+##########################################################################################
 
-# Lambda permissions
+########## Lambda permissions ##########
 resource "aws_lambda_permission" "websocket" {
   statement_id  = "AllowWebSocketInvoke"
   action        = "lambda:InvokeFunction"
@@ -521,14 +596,14 @@ resource "aws_lambda_permission" "rest_api" {
   source_arn    = "${aws_api_gateway_rest_api.questions.execution_arn}/*/*"
 }
 
-# SQS Event Source Mapping
+########## SQS Event Source Mapping ##########
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
   event_source_arn = aws_sqs_queue.game_answers.arn
   function_name    = aws_lambda_function.sqs_processor.arn
   batch_size       = 1
 }
 
-# GitHub Connection for Frontend
+########## GitHub Connection for Frontend ##########
 resource "aws_codestarconnections_connection" "github" {
   name          = "${var.project_name}-github-${var.environment}"
   provider_type = "GitHub"
@@ -539,7 +614,7 @@ resource "aws_codestarconnections_connection" "github" {
   }
 }
 
-# CodeBuild Role and Policy
+########## CodeBuild Role and Policy ##########
 resource "aws_iam_role" "codebuild_role" {
   name = "${var.project_name}-codebuild-${var.environment}"
 
@@ -582,7 +657,9 @@ resource "aws_iam_role_policy" "codebuild_policy" {
           "s3:GetObject",
           "s3:GetObjectVersion",
           "s3:GetBucketAcl",
-          "s3:GetBucketLocation"
+          "s3:GetBucketLocation",
+          "s3:ListBucket",
+          "s3:DeleteObject"
         ]
       },
       {
@@ -596,16 +673,18 @@ resource "aws_iam_role_policy" "codebuild_policy" {
       },
       {
         Effect = "Allow"
-        Resource = ["*"]
+        Resource = [ aws_cloudfront_distribution.website.arn ]
         Action = [
-          "cloudfront:CreateInvalidation"
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+          "cloudfront:ListInvalidations"
         ]
       }
     ]
   })
 }
 
-# CodeBuild Project
+########## CodeBuild Project ##########
 resource "aws_codebuild_project" "frontend" {
   name          = "${var.project_name}-frontend-${var.environment}"
   description   = "Build React frontend application"
@@ -661,7 +740,7 @@ resource "aws_codebuild_project" "frontend" {
   }
 }
 
-# CodePipeline Role
+########## CodePipeline Role ##########
 resource "aws_iam_role" "codepipeline_role" {
   name = "${var.project_name}-codepipeline-${var.environment}"
 
@@ -684,7 +763,7 @@ resource "aws_iam_role" "codepipeline_role" {
   }
 }
 
-# CodePipeline Policy
+########## CodePipeline Policy ##########
 resource "aws_iam_role_policy" "codepipeline_policy" {
   name = "${var.project_name}-codepipeline-policy-${var.environment}"
   role = aws_iam_role.codepipeline_role.id
@@ -726,7 +805,7 @@ resource "aws_iam_role_policy" "codepipeline_policy" {
   })
 }
 
-# CodePipeline
+########## CodePipeline ##########
 resource "aws_codepipeline" "frontend" {
   name     = "${var.project_name}-frontend-pipeline-${var.environment}"
   role_arn = aws_iam_role.codepipeline_role.arn

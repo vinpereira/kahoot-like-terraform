@@ -4,10 +4,15 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "aws_profile" {
+  description = "AWS profile"
+  type = string
+}
+
 variable "project_name" {
   description = "Project name to be used for resource naming"
   type        = string
-  default     = "kahoot-like"
+  default     = "kahoot-like-app"
 }
 
 variable "environment" {

@@ -1,6 +1,7 @@
 ########## S3 Buckets and CloudFront ##########
 resource "aws_s3_bucket" "website" {
   bucket = var.website_bucket_name
+  force_destroy = true
 
   tags = {
     Name        = "${var.project_name}-website"
@@ -10,6 +11,7 @@ resource "aws_s3_bucket" "website" {
 
 resource "aws_s3_bucket" "artifacts" {
   bucket = var.artifacts_bucket_name
+  force_destroy = true
 
   tags = {
     Name        = "${var.project_name}-artifacts"
@@ -20,14 +22,14 @@ resource "aws_s3_bucket" "artifacts" {
 resource "aws_s3_bucket_versioning" "website" {
   bucket = aws_s3_bucket.website.id
   versioning_configuration {
-    status = "Enabled"
+    status = "Disabled"
   }
 }
 
 resource "aws_s3_bucket_versioning" "artifacts" {
   bucket = aws_s3_bucket.artifacts.id
   versioning_configuration {
-    status = "Enabled"
+    status = "Disabled"
   }
 }
 

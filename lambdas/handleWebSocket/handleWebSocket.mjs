@@ -6,7 +6,8 @@ import { ApiGatewayManagementApiClient, PostToConnectionCommand } from "@aws-sdk
 const dynamoDB = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const sqs = new SQSClient({});
 const apiGateway = new ApiGatewayManagementApiClient({
-  endpoint: process.env.WEBSOCKET_API_ENDPOINT
+  endpoint: process.env.WEBSOCKET_API_ENDPOINT,
+  region: process.env.AWS_REGION
 });
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;

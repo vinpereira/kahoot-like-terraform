@@ -305,6 +305,7 @@ resource "aws_lambda_function" "get_questions" {
   role            = aws_iam_role.lambda_role.arn
   handler         = "getQuestions.handler"
   runtime         = var.lambda_runtime
+  source_code_hash = data.archive_file.lambda_package_get_questions.output_base64sha256
 
   tags = {
     Name        = "${var.project_name}-get-questions"
@@ -318,10 +319,11 @@ resource "aws_lambda_function" "websocket_handler" {
   role            = aws_iam_role.lambda_role.arn
   handler         = "handleWebSocket.handler"
   runtime         = var.lambda_runtime
+  source_code_hash = data.archive_file.lambda_package_handle_websocket.output_base64sha256
 
   environment {
     variables = {
-      WEBSOCKET_API_ENDPOINT = aws_apigatewayv2_api.websocket.api_endpoint
+      WEBSOCKET_API_ENDPOINT = replace(aws_apigatewayv2_stage.dev.invoke_url, "wss://", "https://")
       SQS_QUEUE_URL         = aws_sqs_queue.game_answers.url
     }
   }
@@ -338,10 +340,11 @@ resource "aws_lambda_function" "sqs_processor" {
   role            = aws_iam_role.lambda_role.arn
   handler         = "sqsProcessor.handler"
   runtime         = var.lambda_runtime
+  source_code_hash = data.archive_file.lambda_package_sqs_processor.output_base64sha256
 
   environment {
     variables = {
-      WEBSOCKET_API_ENDPOINT = aws_apigatewayv2_api.websocket.api_endpoint
+      WEBSOCKET_API_ENDPOINT = replace(aws_apigatewayv2_stage.dev.invoke_url, "wss://", "https://")
     }
   }
 

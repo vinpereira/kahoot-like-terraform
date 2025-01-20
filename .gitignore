@@ -21,3 +21,5 @@ terraform.rc
 .env
 .idea/
 .vscode/
+
+lambdas/**/*.zip

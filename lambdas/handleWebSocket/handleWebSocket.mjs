@@ -59,12 +59,10 @@ export const handler = async (event) => {
                 console.log('Handling initiateGame');
                 return await handleInitiateGame(connectionId, JSON.parse(event.body));
             
-            // TALK WITH SALVO ABOUT THIS CHANGE AND THE NEW ROUTE
             case 'checkGameStatus':
                 console.log('Handling checkGameStatus');
                 return await handleCheckGameStatus(connectionId, JSON.parse(event.body));
             
-            // TALK WITH SALVO ABOUT THIS CHANGE AND THE NEW ROUTE
             case 'checkNickname':
                 console.log('Handling checkNickname');
                 return await handleCheckNickname(connectionId, JSON.parse(event.body));
@@ -170,13 +168,15 @@ async function handleInitiateGame(connectionId, data) {
     }
 
     try {
-        await apiGateway.send(new PostToConnectionCommand({
-            ConnectionId: connectionId,
-            Data: JSON.stringify({ 
+        const sendData = JSON.stringify({ 
                 type: 'gameInitiated', 
                 gameCode,
                 totalQuestions: questions.length
             })
+        console.log('Sending game initiation message to host where data: ',sendData);
+        await apiGateway.send(new PostToConnectionCommand({
+            ConnectionId: connectionId,
+            Data: sendData
         }));
         console.log('Game initiation message sent to host');
     } catch (error) {
@@ -188,7 +188,6 @@ async function handleInitiateGame(connectionId, data) {
     return { statusCode: 200, body: JSON.stringify({ gameId, gameCode, totalQuestions: questions.length }) };
 }
 
-// TALK WITH SALVO ABOUT THIS CHANGE AND THE NEW ROUTE
 async function handleCheckGameStatus(connectionId, data) {
   const { gameCode } = data;
   
@@ -219,7 +218,6 @@ async function handleCheckGameStatus(connectionId, data) {
   return { statusCode: 200, body: JSON.stringify({ message: 'Game status sent' }) };
 }
 
-// TALK WITH SALVO ABOUT THIS CHANGE AND THE NEW ROUTE
 async function handleCheckNickname(connectionId, data) {
   const { gameCode, nickname } = data;
   
@@ -335,48 +333,47 @@ async function handleStartGame(connectionId, data) {
     
     // Send the first question
     // await sendQuestionToPlayers(gameId, QUESTION_IDS[0]);
-    await sendQuestionToPlayers(gameId, gameData.Item.questions[0], 0);  // SALVO! HO CAMBIATO 1 per 0 qui
-    // await sendQuestionToPlayers(gameId, gameData.Item.questions[0], 1);  // QUESTO È ANTICO
+    await sendQuestionToPlayers(gameId, gameData.Item.questions[0], 0);
     
     return { statusCode: 200, body: JSON.stringify({ message: 'Game started successfully' }) };
 }
 
 async function handleNextQuestion(connectionId, data) {
   const { gameId } = data;
-  
+
   const gameData = await dynamoDB.send(new GetCommand({
     TableName: GAMES_TABLE,
     Key: { gameId }
   }));
-  
+
   if (!gameData.Item || gameData.Item.hostConnectionId !== connectionId) {
     throw new Error('Not authorized to move to next question');
   }
-  
+
   const currentIndex = gameData.Item.currentQuestionIndex;
   const nextIndex = currentIndex + 1;
-  
+
   if (nextIndex >= gameData.Item.totalQuestions) {
     // End the game if we've gone through all questions
     return handleEndGame(connectionId, { gameId });
   }
-  
+
   await dynamoDB.send(new UpdateCommand({
     TableName: GAMES_TABLE,
     Key: { gameId },
     UpdateExpression: 'SET currentQuestionIndex = :questionIndex',
     ExpressionAttributeValues: { ':questionIndex': nextIndex }
   }));
-  
+
   // Send the next question to all players
   await sendQuestionToPlayers(gameId, gameData.Item.questions[nextIndex], nextIndex);
-  
+
   return { statusCode: 200, body: JSON.stringify({ message: 'Moving to next question' }) };
 }
 
 async function sendQuestionToPlayers(gameId, questionId, questionNumber) {
   const questionStartTime = Date.now();
-  
+
   // Update the question start time in the database
   await dynamoDB.send(new UpdateCommand({
     TableName: GAMES_TABLE,
@@ -384,17 +381,17 @@ async function sendQuestionToPlayers(gameId, questionId, questionNumber) {
     UpdateExpression: 'SET QuestionStartTime = :startTime',
     ExpressionAttributeValues: { ':startTime': questionStartTime }
   }));
-  
+
   const gameData = await dynamoDB.send(new GetCommand({
     TableName: GAMES_TABLE,
     Key: { gameId }
   }));
-  
+
   const questionData = await dynamoDB.send(new GetCommand({
     TableName: QUESTIONS_TABLE,
     Key: { QuestionID: questionId }
   }));
-  
+
   if (!questionData.Item) {
     throw new Error(`Question not found: ${questionId}`);
   }
@@ -407,7 +404,7 @@ async function sendQuestionToPlayers(gameId, questionId, questionNumber) {
     question: questionData.Item.Question,
     options: questionData.Item.Options || []
   };
-  
+
   // Send question to all players
   for (const player of gameData.Item.players) {
     await apiGateway.send(new PostToConnectionCommand({
@@ -415,7 +412,7 @@ async function sendQuestionToPlayers(gameId, questionId, questionNumber) {
       Data: JSON.stringify(questionToSend)
     }));
   }
-  
+
   // Send question to host
   await apiGateway.send(new PostToConnectionCommand({
     ConnectionId: gameData.Item.hostConnectionId,
@@ -547,14 +544,14 @@ async function handleEndGame(connectionId, data) {
     // ]);
 
     // console.log('Game ended successfully:', gameId);
-    
+      
     console.log('ENDGAME function -- handleWebSocket');
     for (const player of gameData.Item.players) {
-        await sendWebSocketMessage(player.connectionId, endGameMessage);
+      await sendWebSocketMessage(player.connectionId, endGameMessage);
     }
-    
+      
     await sendWebSocketMessage(gameData.Item.hostConnectionId, endGameMessage);
-    
+      
     return { statusCode: 200, body: JSON.stringify({ message: 'Game ended successfully' }) };
   } catch (error) {
     console.error('Error ending game:', error);

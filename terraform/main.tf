@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 ########## S3 Buckets and CloudFront ##########
 resource "aws_s3_bucket" "website" {
   bucket = var.website_bucket_name
@@ -302,7 +304,7 @@ data "archive_file" "lambda_package_sqs_processor" {
 resource "aws_lambda_function" "get_questions" {
   filename         = data.archive_file.lambda_package_get_questions.output_path
   function_name    = "${var.project_name}-get-questions-${var.environment}"
-  role            = aws_iam_role.lambda_role.arn
+  role            = aws_iam_role.get_questions_lambda_role.arn
   handler         = "getQuestions.handler"
   runtime         = var.lambda_runtime
   source_code_hash = data.archive_file.lambda_package_get_questions.output_base64sha256
@@ -316,7 +318,7 @@ resource "aws_lambda_function" "get_questions" {
 resource "aws_lambda_function" "websocket_handler" {
   filename         = data.archive_file.lambda_package_handle_websocket.output_path
   function_name    = "${var.project_name}-websocket-handler-${var.environment}"
-  role            = aws_iam_role.lambda_role.arn
+  role            = aws_iam_role.websocket_lambda_role.arn
   handler         = "handleWebSocket.handler"
   runtime         = var.lambda_runtime
   source_code_hash = data.archive_file.lambda_package_handle_websocket.output_base64sha256
@@ -337,7 +339,7 @@ resource "aws_lambda_function" "websocket_handler" {
 resource "aws_lambda_function" "sqs_processor" {
   filename         = data.archive_file.lambda_package_sqs_processor.output_path
   function_name    = "${var.project_name}-sqs-processor-${var.environment}"
-  role            = aws_iam_role.lambda_role.arn
+  role            = aws_iam_role.sqs_processor_lambda_role.arn
   handler         = "sqsProcessor.handler"
   runtime         = var.lambda_runtime
   source_code_hash = data.archive_file.lambda_package_sqs_processor.output_base64sha256
@@ -356,8 +358,9 @@ resource "aws_lambda_function" "sqs_processor" {
 ##########################################################################################
 
 ########## IAM Configuration ##########
-resource "aws_iam_role" "lambda_role" {
-  name = "${var.project_name}-lambda-role-${var.environment}"
+# GetQuestions Lambda Role
+resource "aws_iam_role" "get_questions_lambda_role" {
+  name = "${var.project_name}-get-questions-lambda-role-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -371,66 +374,222 @@ resource "aws_iam_role" "lambda_role" {
       }
     ]
   })
-
-  tags = {
-    Name        = "${var.project_name}-lambda-role"
-    Environment = var.environment
-  }
 }
 
-resource "aws_iam_role_policy" "lambda_policy" {
-  name = "${var.project_name}-lambda-policy-${var.environment}"
-  role = aws_iam_role.lambda_role.id
+# GetQuestions Lambda Policy
+resource "aws_iam_role_policy" "get_questions_lambda_policy" {
+  name = "${var.project_name}-get-questions-lambda-policy-${var.environment}"
+  role = aws_iam_role.get_questions_lambda_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # CloudWatch Logs
+      {
+        Effect = "Allow"
+        Action = "logs:CreateLogGroup"
+        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-get-questions-${var.environment}:*"
+        ]
+      },
+      # Questions table - only Scan operation
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:Scan"]
+        Resource = [aws_dynamodb_table.questions.arn]
+      }
+    ]
+  })
+}
+
+# HandleWebSocket Lambda Role
+resource "aws_iam_role" "websocket_lambda_role" {
+  name = "${var.project_name}-websocket-lambda-role-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# WebSocket Lambda specific policy
+resource "aws_iam_role_policy" "websocket_lambda_policy" {
+  name = "${var.project_name}-websocket-lambda-policy-${var.environment}"
+  role = aws_iam_role.websocket_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # CloudWatch Logs
+      {
+        Effect = "Allow"
+        Action = "logs:CreateLogGroup"
+        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-websocket-handler-${var.environment}:*"
+        ]
+      },
+      # Connections table - only DeleteItem and PutItem
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:DeleteItem",
+          "dynamodb:PutItem"
+        ]
+        Resource = [aws_dynamodb_table.connections.arn]
+      },
+      # Games table - needed operations for game management
       {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem",
-          "dynamodb:Query",
+          "dynamodb:Query"
+        ]
+        Resource = [aws_dynamodb_table.games.arn]
+      },
+      # Games table GameCodeIndex
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:Query"]
+        Resource = ["${aws_dynamodb_table.games.arn}/index/GameCodeIndex"]
+      },
+      # Questions table - only read operations
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
           "dynamodb:Scan"
         ]
+        Resource = [aws_dynamodb_table.questions.arn]
+      },
+      # SQS - only SendMessage for answers
+      {
+        Effect = "Allow"
+        Action = ["sqs:SendMessage"]
+        Resource = [aws_sqs_queue.game_answers.arn]
+      },
+      # WebSocket API connections management
+      {
+        Effect = "Allow"
+        Action = ["execute-api:ManageConnections"]
         Resource = [
-          aws_dynamodb_table.questions.arn,
-          aws_dynamodb_table.connections.arn,
-          aws_dynamodb_table.games.arn,
-          aws_dynamodb_table.answers.arn,
-          "${aws_dynamodb_table.games.arn}/index/*"
+          "${aws_apigatewayv2_api.websocket.execution_arn}/${aws_apigatewayv2_stage.dev.name}/POST/@connections/*"
         ]
+      }
+    ]
+  })
+}
+
+# SQS Processor Lambda Role
+resource "aws_iam_role" "sqs_processor_lambda_role" {
+  name = "${var.project_name}-sqs-processor-lambda-role-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# SQS Processor Lambda Policy
+resource "aws_iam_role_policy" "sqs_processor_lambda_policy" {
+  name = "${var.project_name}-sqs-processor-lambda-policy-${var.environment}"
+  role = aws_iam_role.sqs_processor_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # CloudWatch Logs
+      {
+        Effect = "Allow"
+        Action = "logs:CreateLogGroup"
+        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"
       },
       {
         Effect = "Allow"
         Action = [
-          "sqs:SendMessage",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-sqs-processor-${var.environment}:*"
+        ]
+      },
+      # Questions table - only GetItem
+      {
+        Sid = "Stmt1727902206056"
+        Effect = "Allow"
+        Action = ["dynamodb:GetItem"]
+        Resource = [aws_dynamodb_table.questions.arn]
+      },
+      # Games table - GetItem and UpdateItem
+      {
+        Sid = "Stmt1727942798148"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = [aws_dynamodb_table.games.arn]
+      },
+      # Answers table - PutItem and Scan
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:Scan"
+        ]
+        Resource = [aws_dynamodb_table.answers.arn]
+      },
+      # WebSocket API connections management
+      {
+        Effect = "Allow"
+        Action = ["execute-api:ManageConnections"]
+        Resource = [
+          "${aws_apigatewayv2_api.websocket.execution_arn}/${aws_apigatewayv2_stage.dev.name}/POST/@connections/*"
+        ]
+      },
+      # SQS permissions
+      {
+        Effect = "Allow"
+        Action = [
           "sqs:ReceiveMessage",
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"
         ]
         Resource = [aws_sqs_queue.game_answers.arn]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "execute-api:ManageConnections"
-        ]
-        Resource = [
-          "${aws_apigatewayv2_api.websocket.execution_arn}/*",
-          "${aws_api_gateway_rest_api.questions.execution_arn}/*"
-        ]
       }
     ]
   })
@@ -494,6 +653,7 @@ resource "aws_apigatewayv2_api" "websocket" {
   name                       = "${var.project_name}-websocket-${var.environment}"
   protocol_type             = "WEBSOCKET"
   route_selection_expression = "$request.body.action"
+  api_key_selection_expression = "$request.header.x-api-key"
 
   tags = {
     Name        = "${var.project_name}-websocket"

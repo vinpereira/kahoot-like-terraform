@@ -23,3 +23,4 @@ terraform.rc
 .vscode/
 
 lambda_artifacts/
+lambdas/**/*.zip

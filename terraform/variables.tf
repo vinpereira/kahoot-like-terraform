@@ -1,49 +1,44 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
 }
 
 variable "aws_profile" {
   description = "AWS profile"
-  type = string
+  type        = string
 }
 
 variable "project_name" {
-  description = "Project name to be used for resource naming"
+  description = "Project name for resource naming"
   type        = string
-  default     = "kahoot-like-app"
 }
 
 variable "environment" {
   description = "Environment (dev/prod)"
   type        = string
-  default     = "dev"
 }
 
 variable "github_repository_frontend" {
-  description = "GitHub repository for frontend (format: username/repository)"
+  description = "GitHub repository for frontend"
   type        = string
 }
 
 variable "github_branch_frontend" {
   description = "GitHub branch for frontend"
   type        = string
-  default     = "main"
 }
 
 variable "website_bucket_name" {
-  description = "Name of the S3 bucket for website hosting"
+  description = "S3 bucket name for website hosting"
   type        = string
 }
 
 variable "artifacts_bucket_name" {
-  description = "Name of the S3 bucket for build artifacts"
+  description = "S3 bucket name for build artifacts"
   type        = string
 }
 
 variable "lambda_runtime" {
   description = "Runtime for Lambda functions"
   type        = string
-  default     = "nodejs20.x"
 }

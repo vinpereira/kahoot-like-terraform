@@ -64,4 +64,5 @@ module "ci_cd" {
   cloudfront_distribution_arn = module.storage.cloudfront_distribution_arn
   rest_api_url = module.api.rest_api_url
   websocket_stage_url = module.api.websocket_stage_url
+  notification_email = var.notification_email
 }

@@ -45,3 +45,14 @@ variable "rest_api_url" {
 variable "websocket_stage_url" {
   type = string
 }
+
+variable "pipeline_notification_topic_arn" {
+  description = "ARN of SNS topic for pipeline notifications"
+  type        = string
+  default     = ""
+}
+
+variable "notification_email" {
+  description = "Email address to receive pipeline notifications"
+  type        = string
+}

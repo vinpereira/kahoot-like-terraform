@@ -42,3 +42,8 @@ variable "lambda_runtime" {
   description = "Runtime for Lambda functions"
   type        = string
 }
+
+variable "notification_email" {
+  description = "Email address to receive pipeline notifications"
+  type        = string
+}

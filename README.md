@@ -23,15 +23,20 @@ terraform-kahoot/
 │   ├── outputs.tf           # Output definitions
 │   ├── providers.tf         # Provider configurations
 │   ├── terraform.tfvars     # Variable values
-│   ├── dev.tfvars          # Development environment variables
-│   └── prod.tfvars         # Production environment variables
-├── lambdas/
-│   ├── getQuestions/
-│   │   └── getQuestions.mjs # REST API Lambda handler
-│   ├── webSocket/
-│   │   └── handleWebSocket.mjs # WebSocket Lambda handler
-│   └── sqsProcessor/
-│       └── sqsProcessor.mjs # SQS message processor
+│   ├── modules/
+│   │   ├── api/            # API Gateway configurations
+│   │   ├── compute/        # Lambda functions and IAM roles
+│   │   ├── storage/        # S3 and CloudFront
+│   │   ├── database/       # DynamoDB tables
+│   │   ├── messaging/      # SQS configuration
+│   │   └── ci_cd/          # CodePipeline and CodeBuild
+│   └── lambdas/
+│       ├── getQuestions/
+│       │   └── getQuestions.mjs  # REST API Lambda handler
+│       ├── handleWebSocket/
+│       │   └── handleWebSocket.mjs  # WebSocket Lambda handler
+│       └── sqsProcessor/
+│           └── sqsProcessor.mjs  # SQS message processor
 └── README.md
 ```
 
@@ -47,7 +52,7 @@ terraform-kahoot/
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone 
 cd terraform-kahoot
 ```
 
@@ -64,43 +69,55 @@ Create a `terraform.tfvars` file with your specific values:
 
 ```hcl
 aws_region = "us-east-1"
+aws_profile = "terraform-admin"
 project_name = "kahoot-like"
 environment = "dev"
 github_repository_frontend = "your-username/your-frontend-repo"
+github_branch_frontend = "main"
 website_bucket_name = "your-website-bucket-name"
 artifacts_bucket_name = "your-artifacts-bucket-name"
+lambda_runtime = "nodejs20.x"
 ```
 
-### 4. Package Lambda Functions
-
-Before applying Terraform, package the Lambda functions:
+### 4. Deploy Infrastructure
 
 ```bash
-cd ../lambdas/getQuestions
-zip -r get_questions.zip .
-
-cd ../webSocket
-zip -r websocket_handler.zip .
-
-cd ../sqsProcessor
-zip -r sqs_processor.zip .
+terraform plan
+terraform apply
 ```
 
-### 5. Deploy Infrastructure
+### 5. Post-Deployment Manual Steps
 
-```bash
-cd ../../terraform
-terraform plan -var-file="dev.tfvars"
-terraform apply -var-file="dev.tfvars"
-```
+After successful deployment, several manual steps are required:
 
-### 6. Complete GitHub Connection
+1. **Connect GitHub to AWS CodePipeline**:
+   - Go to AWS Console > Developer Tools > CodeStar Connections
+   - Find the pending connection
+   - Click "Update pending connection"
+   - Follow the prompts to authorize GitHub access
 
-After deployment:
-1. Go to AWS Console > Developer Tools > CodeStar Connections
-2. Find the pending connection
-3. Click "Update pending connection"
-4. Follow the prompts to authorize GitHub access
+2. **Update Frontend Configuration**:
+   - In your frontend repository, update the `config.js` file with:
+     - API URL (from terraform outputs)
+     - WebSocket URL (from terraform outputs)
+   - Commit and push these changes
+
+3. **Trigger Initial Deployment**:
+   - Go to AWS CodePipeline console
+   - Find your pipeline
+   - Click "Release Change" to trigger the initial deployment
+
+4. **Add Questions to DynamoDB**:
+   - Go to AWS DynamoDB console
+   - Find the "KahootQuestions" table
+   - Add initial questions manually or using AWS CLI
+
+### 6. Verify Deployment
+
+- Check CloudFront distribution is deployed
+- Verify frontend is accessible
+- Test WebSocket connections
+- Confirm questions API is working
 
 ## Database Structure
 
@@ -166,8 +183,10 @@ The following environment variables are set in CodeBuild for the frontend deploy
 To destroy the infrastructure:
 
 ```bash
-terraform destroy -var-file="dev.tfvars"
+terraform destroy"
 ```
+
+Note: This will remove all resources including S3 buckets and DynamoDB tables. Make sure to backup any important data before destroying.
 
 ## Monitoring and Maintenance
 
